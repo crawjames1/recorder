@@ -1,0 +1,278 @@
+
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Conference Recorder — Notes-Free Capture</title>
+  <style>
+    :root {
+      --bg: #0b0f14; --panel:#111827; --muted:#94a3b8; --text:#e5e7eb; --accent:#60a5fa; --good:#34d399; --warn:#f59e0b; --bad:#f87171;
+    }
+    *{box-sizing:border-box;font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial}
+    body{margin:0;background:linear-gradient(180deg,#0b0f14,#0b1220);color:var(--text)}
+    header{position:sticky;top:0;z-index:10;background:rgba(17,24,39,.8);backdrop-filter:saturate(150%) blur(8px);border-bottom:1px solid #1f2937}
+    .wrap{max-width:1100px;margin:0 auto;padding:16px}
+    h1{font-size:20px;margin:0}
+    .grid{display:grid;grid-template-columns:1.2fr .8fr;gap:16px}
+    @media (max-width: 900px){.grid{grid-template-columns:1fr}}
+    .card{background:var(--panel);border:1px solid #1f2937;border-radius:16px;box-shadow:0 10px 30px rgba(0,0,0,.25)}
+    .card h2{font-size:16px;margin:0 0 8px 0;color:#cbd5e1}
+    .card .inner{padding:16px}
+    .controls{display:flex;gap:10px;flex-wrap:wrap}
+    button{appearance:none;border:none;border-radius:12px;padding:10px 14px;font-weight:600;color:#0b0f14;background:#334155;cursor:pointer;transition:.15s}
+    button:hover{transform:translateY(-1px);filter:brightness(1.05)}
+    button.primary{background:var(--accent);color:#0b0f14}
+    button.good{background:var(--good);color:#0b0f14}
+    button.warn{background:var(--warn);color:#0b0f14}
+    button.bad{background:var(--bad);color:#0b0f14}
+    .pill{display:inline-flex;align-items:center;gap:8px;padding:6px 10px;border-radius:999px;background:#0b1220;border:1px solid #1f2937;color:#cbd5e1}
+    .status-dot{width:8px;height:8px;border-radius:50%}
+    .dot-idle{background:#64748b}
+    .dot-rec{background:#ef4444;box-shadow:0 0 0 4px rgba(239,68,68,.15)}
+    .dot-transcribing{background:#f59e0b}
+    .mono{font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace}
+    textarea{width:100%;min-height:300px;resize:vertical;background:#0b1220;color:var(--text);border:1px solid #1f2937;border-radius:12px;padding:12px}
+    .note{color:var(--muted);font-size:13px}
+    .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+    audio{width:100%}
+    .kbd{font-family:ui-monospace,Menlo,Consolas,monospace;background:#0b1220;border:1px solid #1f2937;border-bottom-color:#0b1220;padding:2px 6px;border-radius:6px}
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap row">
+      <h1>🎙️ Conference Recorder</h1>
+      <span class="pill" id="statusPill"><span class="status-dot dot-idle"></span><span id="statusText">Idle</span></span>
+      <span class="pill" id="timer">00:00:00</span>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <div class="grid">
+      <!-- Left: Transcript -->
+      <section class="card">
+        <div class="inner">
+          <h2>Live Transcript</h2>
+          <div class="row" style="margin-bottom:10px">
+            <div class="controls">
+              <button id="startBtn" class="primary">Start Recording (R)</button>
+              <button id="markBtn" class="warn" disabled>Drop Marker (M)</button>
+              <button id="stopBtn" class="bad" disabled>Stop (S)</button>
+            </div>
+          </div>
+          <textarea id="transcript" placeholder="Transcript will appear here..." spellcheck="false"></textarea>
+          <div class="row" style="margin-top:10px">
+            <button id="saveTxt" class="good" disabled>Save Transcript (.txt)</button>
+            <button id="saveAudio" disabled>Save Audio (.webm)</button>
+            <label class="note"><input type="checkbox" id="autoScroll" checked /> Auto‑scroll</label>
+          </div>
+          <p class="note" style="margin-top:8px">Tip: Works best in Chrome or Edge. Use a USB conference mic if possible. Web Speech provides live captions; final accuracy improves if you post‑process audio later with Whisper/Azure.</p>
+        </div>
+      </section>
+
+      <!-- Right: Preview & Settings -->
+      <aside class="card">
+        <div class="inner">
+          <h2>Audio Preview</h2>
+          <audio id="player" controls></audio>
+          <div class="row" style="margin-top:10px">
+            <label class="note">Input device:</label>
+            <select id="micSelect"></select>
+          </div>
+          <div class="row" style="margin-top:10px">
+            <label class="note">Language:</label>
+            <select id="lang">
+              <option value="en-US" selected>English (US)</option>
+              <option value="en-GB">English (UK)</option>
+              <option value="es-ES">Español (ES)</option>
+              <option value="fr-FR">Français (FR)</option>
+              <option value="de-DE">Deutsch (DE)</option>
+              <option value="it-IT">Italiano (IT)</option>
+              <option value="pt-BR">Português (BR)</option>
+              <option value="ja-JP">日本語</option>
+              <option value="ko-KR">한국어</option>
+              <option value="zh-CN">中文 (简体)</option>
+            </select>
+          </div>
+          <p class="note" style="margin-top:10px">Keyboard: <span class="kbd">R</span> start, <span class="kbd">S</span> stop, <span class="kbd">M</span> marker.</p>
+        </div>
+      </aside>
+    </div>
+  </main>
+
+  <script>
+    // --- Feature checks ---
+    const hasMedia = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+    const hasSpeech = 'webkitSpeechRecognition' in window || 'SpeechRecognition' in window;
+
+    if (!hasMedia) alert('getUserMedia not supported in this browser. Please use Chrome/Edge on desktop.');
+
+    // --- Elements ---
+    const startBtn = document.getElementById('startBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const markBtn = document.getElementById('markBtn');
+    const saveTxtBtn = document.getElementById('saveTxt');
+    const saveAudioBtn = document.getElementById('saveAudio');
+    const transcriptEl = document.getElementById('transcript');
+    const statusPill = document.getElementById('statusPill');
+    const statusText = document.getElementById('statusText');
+    const timerEl = document.getElementById('timer');
+    const micSelect = document.getElementById('micSelect');
+    const langSelect = document.getElementById('lang');
+    const autoScroll = document.getElementById('autoScroll');
+    const player = document.getElementById('player');
+
+    // --- State ---
+    let mediaStream = null;
+    let mediaRecorder = null;
+    let chunks = [];
+    let recStartTime = 0;
+    let timerInterval = null;
+    let recognition = null;
+
+    function setStatus(kind, text){
+      statusText.textContent = text || kind;
+      const dot = statusPill.querySelector('.status-dot');
+      dot.className = 'status-dot ' + (kind === 'Recording' ? 'dot-rec' : kind === 'Transcribing' ? 'dot-transcribing' : 'dot-idle');
+    }
+
+    function fmt(sec){
+      const h = String(Math.floor(sec/3600)).padStart(2,'0');
+      const m = String(Math.floor((sec%3600)/60)).padStart(2,'0');
+      const s = String(Math.floor(sec%60)).padStart(2,'0');
+      return `${h}:${m}:${s}`;
+    }
+
+    async function listMics(){
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      micSelect.innerHTML = '';
+      devices.filter(d => d.kind === 'audioinput').forEach((d, idx) => {
+        const opt = document.createElement('option');
+        opt.value = d.deviceId; opt.textContent = d.label || `Microphone ${idx+1}`;
+        micSelect.appendChild(opt);
+      });
+    }
+
+    async function getStream(){
+      const deviceId = micSelect.value || undefined;
+      mediaStream = await navigator.mediaDevices.getUserMedia({ audio: deviceId ? {deviceId: {exact: deviceId}} : true });
+      player.srcObject = mediaStream;
+      return mediaStream;
+    }
+
+    function startTimer(){
+      recStartTime = Date.now();
+      timerInterval = setInterval(()=>{
+        const sec = (Date.now() - recStartTime)/1000; timerEl.textContent = fmt(sec);
+      }, 200);
+    }
+    function stopTimer(){ clearInterval(timerInterval); timerInterval = null; }
+
+    function startSpeech(){
+      if (!hasSpeech) return;
+      const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+      recognition = new SR();
+      recognition.lang = langSelect.value || 'en-US';
+      recognition.interimResults = true; recognition.continuous = true;
+      let buffer = '';
+      recognition.onresult = (e)=>{
+        let interim = '';
+        for (let i=e.resultIndex; i<e.results.length; i++){
+          const t = e.results[i][0].transcript;
+          if (e.results[i].isFinal) buffer += t + ' ';
+          else interim += t;
+        }
+        transcriptEl.value = (buffer + (interim ? '\n' + interim : '')).trim();
+        if (autoScroll.checked) transcriptEl.scrollTop = transcriptEl.scrollHeight;
+      };
+      recognition.onerror = (e)=>{ console.warn('Speech error', e.error); };
+      recognition.onend = ()=>{ /* auto-restart for resilience while recording */
+        if (mediaRecorder && mediaRecorder.state === 'recording') recognition.start();
+      };
+      recognition.start();
+    }
+    function stopSpeech(){ if (recognition) { recognition.onend = null; recognition.stop(); recognition = null; } }
+
+    async function startRecording(){
+      setStatus('Recording','Recording');
+      startBtn.disabled = true; stopBtn.disabled = false; markBtn.disabled = false; saveTxtBtn.disabled = true; saveAudioBtn.disabled = true;
+
+      await getStream();
+      mediaRecorder = new MediaRecorder(mediaStream, {mimeType: 'audio/webm'});
+      chunks = [];
+      mediaRecorder.ondataavailable = (e)=>{ if (e.data.size > 0) chunks.push(e.data); };
+      mediaRecorder.onstop = ()=>{
+        const blob = new Blob(chunks, {type:'audio/webm'});
+        const url = URL.createObjectURL(blob);
+        player.srcObject = null; player.src = url; player.play().catch(()=>{});
+        saveAudioBtn.dataset.blobUrl = url;
+        saveAudioBtn.disabled = false; saveTxtBtn.disabled = false;
+        setStatus('Idle','Stopped');
+      };
+      mediaRecorder.start();
+      startTimer();
+      startSpeech();
+    }
+
+    function stopRecording(){
+      stopBtn.disabled = true; markBtn.disabled = true; startBtn.disabled = false;
+      stopTimer();
+      stopSpeech();
+      if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop();
+      if (mediaStream){ mediaStream.getTracks().forEach(t=>t.stop()); mediaStream = null; }
+    }
+
+    function dropMarker(){
+      const elapsedSec = (Date.now() - recStartTime)/1000;
+      transcriptEl.value += `\n[MARK ${fmt(elapsedSec)}] — `;
+      if (autoScroll.checked) transcriptEl.scrollTop = transcriptEl.scrollHeight;
+    }
+
+    function saveBlob(url, filename){
+      const a = document.createElement('a'); a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove();
+    }
+
+    function saveTranscript(){
+      const blob = new Blob([transcriptEl.value], {type:'text/plain'});
+      const url = URL.createObjectURL(blob);
+      const stamp = new Date().toISOString().replace(/[:.]/g,'-');
+      saveBlob(url, `transcript_${stamp}.txt`);
+      URL.revokeObjectURL(url);
+    }
+
+    function saveAudio(){
+      const url = saveAudioBtn.dataset.blobUrl; if (!url) return;
+      const stamp = new Date().toISOString().replace(/[:.]/g,'-');
+      saveBlob(url, `audio_${stamp}.webm`);
+    }
+
+    // --- Wire up ---
+    startBtn.addEventListener('click', startRecording);
+    stopBtn.addEventListener('click', stopRecording);
+    markBtn.addEventListener('click', dropMarker);
+    saveTxtBtn.addEventListener('click', saveTranscript);
+    saveAudioBtn.addEventListener('click', saveAudio);
+    langSelect.addEventListener('change', ()=>{ if (recognition) { stopSpeech(); startSpeech(); } });
+
+    // Keyboard shortcuts
+    document.addEventListener('keydown', (e)=>{
+      if (e.target && ['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName)) return;
+      if (e.key.toLowerCase()==='r' && !startBtn.disabled) startRecording();
+      if (e.key.toLowerCase()==='s' && !stopBtn.disabled) stopRecording();
+      if (e.key.toLowerCase()==='m' && !markBtn.disabled) dropMarker();
+    });
+
+    // Init
+    (async ()=>{
+      try{
+        await navigator.mediaDevices.getUserMedia({audio:true});
+        await listMics();
+      }catch(err){
+        console.error(err);
+        alert('Microphone permission is required. Please allow access and reload.');
+      }
+    })();
+  </script>
+</body>
+</html>
